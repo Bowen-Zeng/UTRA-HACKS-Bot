@@ -57,7 +57,7 @@ void loop() {
   // --- DRIVE FORWARD ---
   
   // Set Left Motor Forward
-  driveLeftWheel(200);
+  startLeftWheel(200);
 
   // Set Right Motor Forward
   driveRightWheel(200);
