@@ -1,23 +1,58 @@
 const int leftIR = 2;
 const int rightIR = 3;
 
+bool startedTimer = false;
+
 void setup() {
   // put your setup code here, to run once:
-  pinMode(leftSensor, INPUT);
-  pinMode(rightSensor, INPUT);
-  Serial.begin(9600);
+  pinMode(leftIR, INPUT);
+  pinMode(rightIR, INPUT);
+}
+
+void followLine(bool left, bool right) {
+  // LOGIC: 1 is Black (Line), 0 is White (Floor)
+  if (left == 0 && right == 0 || ) {
+    // CASE 1: Both on White -> We are centered!
+    // CASE 4: Both on Black -> Off track
+    // ACTION: Drive Forward
+    startLeftWheel(255);
+    startRightWheel(255);
+  }
+  else if (left == 1 && right == 0) {
+    // CASE 2: Left sees Black -> We drifted to the Right
+    // ACTION: Turn Left to fix it
+    startLeftWheel(150);
+    startRightWheel(255);
+  }
+  else if (left == 0 && right == 1) {
+    // CASE 3: Right sees Black -> We drifted to the Left
+    // ACTION: Turn Right to fix it
+    startLeftWheel(255);
+    startRightWheel(150);
+  }
+  else {
+    // CASE 4: Both on Black -> Intersection or Stop Line
+    // ACTION: Stop (or drive forward if you want to cross it)
+    stopRobot(); // temp code
+  }
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-  int leftValue = digitalRead(leftSensor);
-  int rightValue = digitalRead(rightSensor);
+  if (!isTiming) {
+    startTime = millis(); 
+    startedTimer = true;
+  }
 
-  Serial.print("Left: ");
-  Serial.print(leftValue);
-  Serial.print(" | Right: ");
-  Serial.println(rightValue);
-  
-  delay(500); // Slow down so you can read it
+  // Check if 5 seconds have passed
+  if (millis() - startTime < 5000) {
+    // INTERVAL ACTION: Follow the line normally
+    int left = digitalRead(leftIR);
+    int right = digitalRead(rightIR);
+    followLine(left, right);
+
+    // reset timer
+    startedTimer = false;
+  }
 }
 
