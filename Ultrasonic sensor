@@ -1,0 +1,41 @@
+// Ultrasonic Sensor (HC-SR04) Distance Measurement
+
+// Pin connections
+const int trigPin = 10;
+const int echoPin = 11;
+
+// Variables
+long duration;
+int distance;
+
+
+void setup() {
+  // Set trigPin as OUTPUT (sends sound pulse)
+  pinMode(trigPin, OUTPUT);
+
+  // Set echoPin as INPUT (receives bounce signal)
+  pinMode(echoPin, INPUT);
+
+  // Start Serial Monitor
+  Serial.begin(115200);
+}
+
+void loop() {
+  // Step 1: Clear the trigger pin
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+
+  // Step 2: Send a 10 microsecond pulse
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  // Step 3: Read the echo pulse duration
+  duration = pulseIn(echoPin, HIGH);
+
+  //Calculate distance and read out the distance to the terminal 
+  distance = duration * 0.034/2; 
+
+  Serial.print("Distance: ");
+  Serial.println(distance);
+}
