@@ -9,7 +9,11 @@ void setup() {
   pinMode(rightIR, INPUT);
 }
 
-void followLine(bool left, bool right) {
+void followLine() {
+  // INTERVAL ACTION: Follow the line normally
+  int left = digitalRead(leftIR);
+  int right = digitalRead(rightIR);
+
   // LOGIC: 1 is Black (Line), 0 is White (Floor)
   if (left == 0 && right == 0 || ) {
     // CASE 1: Both on White -> We are centered!
@@ -17,23 +21,22 @@ void followLine(bool left, bool right) {
     // ACTION: Drive Forward
     startLeftWheel(255);
     startRightWheel(255);
-  }
-  else if (left == 1 && right == 0) {
+  } else if (left == 1 && right == 0) {
     // CASE 2: Left sees Black -> We drifted to the Right
     // ACTION: Turn Left to fix it
     startLeftWheel(150);
     startRightWheel(255);
-  }
-  else if (left == 0 && right == 1) {
+  } else if (left == 0 && right == 1) {
     // CASE 3: Right sees Black -> We drifted to the Left
     // ACTION: Turn Right to fix it
     startLeftWheel(255);
     startRightWheel(150);
-  }
-  else {
+  } else {
     // CASE 4: Both on Black -> Intersection or Stop Line
-    // ACTION: Stop (or drive forward if you want to cross it)
-    stopRobot(); // temp code
+    // REAL ACTION: CHANGES BASED ON GAME STAGE
+    // ACTION: Reverse sharply in same direction as prev direction
+    // need to pass in prevDirection
+    // if prevDirection == ...
   }
 }
 
@@ -47,8 +50,6 @@ void loop() {
   // Check if 5 seconds have passed
   if (millis() - startTime < 5000) {
     // INTERVAL ACTION: Follow the line normally
-    int left = digitalRead(leftIR);
-    int right = digitalRead(rightIR);
     followLine(left, right);
 
     // reset timer
