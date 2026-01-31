@@ -1,3 +1,41 @@
+const int trigPin = 10;
+const int echoPin = 11;
+
+void setup() {
+  pinMode(trigPin, OUTPUT); // Sets the trigPin as an Output
+  pinMode(echoPin, INPUT);  // Sets the echoPin as an Input
+  Serial.begin(9600);       // For debugging
+}
+
+long getDistance() {
+  // 1. Clear the trigPin
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  
+  // 2. Trigger the sensor by sending a 10 microsecond pulse
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  
+  // 3. Read the echoPin (returns the sound wave travel time in microseconds)
+  long duration = pulseIn(echoPin, HIGH);
+  
+  // 4. Calculate the distance in centimeters
+  long distanceCm = duration * 0.034 / 2;
+  
+  return distanceCm;
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  long dist = getDistance();
+  
+  Serial.print("Distance: ");
+  Serial.print(dist);
+  Serial.println(" cm");
+
+  delay(50);
+}
 // Ultrasonic Sensor (HC-SR04) Distance Measurement
 
 // Pin connections
