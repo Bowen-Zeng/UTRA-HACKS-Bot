@@ -1,1 +1,22 @@
+int readColor() {
+  // Placeholder calibration values
+  int r, g, b;
 
+  digitalWrite(COLOR_S2, LOW);
+  digitalWrite(COLOR_S3, LOW);
+  r = pulseIn(COLOR_OUT, LOW);
+
+  digitalWrite(COLOR_S2, HIGH);
+  digitalWrite(COLOR_S3, HIGH);
+  g = pulseIn(COLOR_OUT, LOW);
+
+  digitalWrite(COLOR_S2, LOW);
+  digitalWrite(COLOR_S3, HIGH);
+  b = pulseIn(COLOR_OUT, LOW);
+
+  if (r < g && r < b) return 1;  // RED
+  if (g < r && g < b) return 2;  // GREEN
+  if (b < r && b < g) return 3;  // BLUE
+  if (r + g + b < 150) return 4; // BLACK
+  return 0;
+}
