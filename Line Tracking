@@ -1,1 +1,117 @@
+#define IR_SENSOR_RIGHT 6
+#define IR_SENSOR_LEFT 8
 
+// Motor speed constants
+#define MOTOR_SPEED 80
+#define TURN_SPEED 100      // Higher speed for sharper turns
+#define SLOW_SPEED 60       // Slower speed for precise movements
+
+// Right motor
+int enableRightMotor = 9;
+int rightMotorPin1 = 2;
+int rightMotorPin2 = 3;
+
+// Left motor
+int enableLeftMotor = 10;
+int leftMotorPin1 = 4;
+int leftMotorPin2 = 5;
+
+// State tracking
+unsigned long lastLineTime = 0;
+bool onLine = false;
+
+void setup() {
+  Serial.begin(9600);  // For debugging
+  
+  // PWM frequency adjustment for smoother motor control
+  TCCR0B = TCCR0B & B11111000 | B00000010;
+  
+  pinMode(enableRightMotor, OUTPUT);
+  pinMode(rightMotorPin1, OUTPUT);
+  pinMode(rightMotorPin2, OUTPUT);
+  pinMode(enableLeftMotor, OUTPUT);
+  pinMode(leftMotorPin1, OUTPUT);
+  pinMode(leftMotorPin2, OUTPUT);
+  pinMode(IR_SENSOR_RIGHT, INPUT);
+  pinMode(IR_SENSOR_LEFT, INPUT);
+  
+  rotateMotor(0, 0);
+}
+
+void loop() {
+  int rightIRSensorValue = digitalRead(IR_SENSOR_RIGHT);
+  int leftIRSensorValue = digitalRead(IR_SENSOR_LEFT);
+  
+  // Debug output
+  Serial.print("L: ");
+  Serial.print(leftIRSensorValue);
+  Serial.print(" R: ");
+  Serial.println(rightIRSensorValue);
+  
+  // Both sensors on white (no line detected) - go straight
+  if (rightIRSensorValue == LOW && leftIRSensorValue == LOW) {
+    rotateMotor(MOTOR_SPEED, MOTOR_SPEED);
+    onLine = false;
+  }
+  // Right sensor on black - turn right
+  else if (rightIRSensorValue == HIGH && leftIRSensorValue == LOW) {
+    rotateMotor(TURN_SPEED, SLOW_SPEED);  // Gentle right turn
+    onLine = true;
+    lastLineTime = millis();
+  }
+  // Left sensor on black - turn left
+  else if (rightIRSensorValue == LOW && leftIRSensorValue == HIGH) {
+    rotateMotor(SLOW_SPEED, TURN_SPEED);  // Gentle left turn
+    onLine = true;
+    lastLineTime = millis();
+  }
+  // Both sensors on black - handle intersection/decision point
+  else if (rightIRSensorValue == HIGH && leftIRSensorValue == HIGH) {
+    handleIntersection();
+    lastLineTime = millis();
+  }
+}
+
+void handleIntersection() {
+  // For the hackathon, this is where you'd detect:
+  // - The red/green path split
+  // - Target center (black zone)
+  // - End of section markers
+  
+  // Default: stop for now (you can modify this based on your strategy)
+  rotateMotor(0, 0);
+  delay(100);  // Brief pause
+  
+  // Continue straight through intersection
+  rotateMotor(MOTOR_SPEED, MOTOR_SPEED);
+  delay(200);  // Move forward to clear the intersection
+}
+
+void rotateMotor(int rightMotorSpeed, int leftMotorSpeed) {
+  // Right motor direction
+  if (rightMotorSpeed < 0) {
+    digitalWrite(rightMotorPin1, LOW);
+    digitalWrite(rightMotorPin2, HIGH);
+  } else if (rightMotorSpeed > 0) {
+    digitalWrite(rightMotorPin1, HIGH);
+    digitalWrite(rightMotorPin2, LOW);
+  } else {
+    digitalWrite(rightMotorPin1, LOW);
+    digitalWrite(rightMotorPin2, LOW);
+  }
+  
+  // Left motor direction
+  if (leftMotorSpeed < 0) {
+    digitalWrite(leftMotorPin1, LOW);
+    digitalWrite(leftMotorPin2, HIGH);
+  } else if (leftMotorSpeed > 0) {
+    digitalWrite(leftMotorPin1, HIGH);
+    digitalWrite(leftMotorPin2, LOW);
+  } else {
+    digitalWrite(leftMotorPin1, LOW);
+    digitalWrite(leftMotorPin2, LOW);
+  }
+  
+  analogWrite(enableRightMotor, abs(rightMotorSpeed));
+  analogWrite(enableLeftMotor, abs(leftMotorSpeed));
+}
