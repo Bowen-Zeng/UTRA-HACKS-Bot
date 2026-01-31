@@ -1,101 +1,120 @@
-//Setting pins
 #define S0 8
 #define S1 9
 #define S2 6
 #define S3 7
 #define sensorOut 2
 
-//Calibrating the bounds for the colours
-#define RED_LOW_PARA    40
-#define RED_HIGH_PARA   200
-#define GREEN_LOW_PARA  50
-#define GREEN_HIGH_PARA 300
-#define BLUE_LOW_PARA   50
-#define BLUE_HIGH_PARA  300
+// ---- Tuning knobs ----
+#define CONFIDENCE_RATIO 1.12        // lower = easier to call RGB colors
+#define BLACK_INTENSITY_MAX 3.30     // raise a bit because your black intensity ~2.3–3.0
+#define NEUTRAL_SIMILAR_RATIO 1.35   // higher = more tolerant that R/G/B are "similar" for black
+#define STABLE_COUNT 3               // must see same result this many times before printing
 
-// Detection tuning
-#define BLACK_TOTAL_MAX      120   // <= this => BLACK (tune using Serial Monitor)
-#define MIN_TOTAL_INTENSITY  80    // if total is very low, treat as BLACK/NOISE (tune)
-#define DOMINANCE_RATIO      1.25  // bigger = stricter, smaller = more tolerant
-
-int red = 0;
-int green = 0;
-int blue = 0;
-
-int readColorMapped(int s2, int s3, int highPara, int lowPara) {
+unsigned long readPulse(int s2, int s3) {
   digitalWrite(S2, s2);
   digitalWrite(S3, s3);
+  delay(3);
+  return pulseIn(sensorOut, LOW, 30000);
+}
 
-  unsigned long pulse = pulseIn(sensorOut, LOW, 30000); // 30ms timeout
-  if (pulse == 0) return 0; // No signal detected
+unsigned long avgPulse(int s2, int s3, int samples=10) {
+  unsigned long sum = 0;
+  for (int i = 0; i < samples; i++) {
+    unsigned long p = readPulse(s2, s3);
+    if (p == 0) p = 30000;
+    sum += p;
+  }
+  return sum / samples;
+}
 
-  int val = map((int)pulse, highPara, lowPara, 255, 0);
+// White reference pulses
+unsigned long wR, wG, wB;
 
-  // Safety clamp
-  if (val < 0) val = 0;
-  if (val > 255) val = 255;
+String lastCandidate = "";
+int sameCount = 0;
 
-  return val;
+String classify(float sR, float sG, float sB) {
+  float intensity = sR + sG + sB;
+
+  float maxS = max(sR, max(sG, sB));
+  float minS = min(sR, min(sG, sB));
+
+  // BLACK: overall low-ish intensity + channels pretty similar
+  if (intensity <= BLACK_INTENSITY_MAX && maxS <= minS * NEUTRAL_SIMILAR_RATIO) {
+    return "BLACK";
+  }
+
+  // Find winner + second
+  float max1 = sR, max2 = sG;
+  char winner = 'R';
+
+  if (sG > max1) { winner = 'G'; max2 = max1; max1 = sG; }
+  else { max2 = sG; }
+
+  if (sB > max1) { winner = 'B'; max2 = max1; max1 = sB; }
+  else if (sB > max2) { max2 = sB; }
+
+  // Require confidence gap (prevents "default red")
+  if (max1 < max2 * CONFIDENCE_RATIO) return "UNKNOWN";
+
+  if (winner == 'R') return "RED";
+  if (winner == 'G') return "GREEN";
+  return "BLUE";
 }
 
 void setup() {
-  pinMode(S0, OUTPUT);
-  pinMode(S1, OUTPUT);
-  pinMode(S2, OUTPUT);
-  pinMode(S3, OUTPUT);
+  pinMode(S0, OUTPUT); pinMode(S1, OUTPUT);
+  pinMode(S2, OUTPUT); pinMode(S3, OUTPUT);
   pinMode(sensorOut, INPUT);
 
-  // Frequency scaling (common: S0 HIGH, S1 LOW)
   digitalWrite(S0, HIGH);
   digitalWrite(S1, LOW);
 
   Serial.begin(9600);
+
+  Serial.println("Put WHITE under sensor (keep same distance). Calibrating...");
+  delay(800);
+
+  // Your confirmed mapping:
+  wR = avgPulse(LOW,  LOW);    // 00 = RED
+  wB = avgPulse(LOW,  HIGH);   // 01 = BLUE
+  wG = avgPulse(HIGH, HIGH);   // 11 = GREEN
+
+  Serial.print("WHITE ref pulses: wR="); Serial.print(wR);
+  Serial.print(" wG="); Serial.print(wG);
+  Serial.print(" wB="); Serial.println(wB);
+
+  Serial.println("Done.");
 }
 
 void loop() {
-  // Read RGB mapped values (0..255)
-  red   = readColorMapped(LOW,  LOW,  RED_HIGH_PARA,   RED_LOW_PARA);
-  delay(50);
-  green = readColorMapped(HIGH, HIGH, GREEN_HIGH_PARA, GREEN_LOW_PARA);
-  delay(50);
-  blue  = readColorMapped(LOW,  HIGH, BLUE_HIGH_PARA,  BLUE_LOW_PARA);
-  delay(50);
+  // Current pulses
+  unsigned long pR = avgPulse(LOW,  LOW, 10);
+  unsigned long pB = avgPulse(LOW,  HIGH, 10);
+  unsigned long pG = avgPulse(HIGH, HIGH, 10);
 
-  int total = red + green + blue;
+  // Normalized strengths (bigger = stronger)
+  float sR = (float)wR / (float)pR;
+  float sG = (float)wG / (float)pG;
+  float sB = (float)wB / (float)pB;
 
-  // OPTIONAL: keep this if you want to debug readings
-  Serial.print("R="); Serial.print(red);
-  Serial.print(" G="); Serial.print(green);
-  Serial.print(" B="); Serial.print(blue);
-  Serial.print(" total="); Serial.print(total);
-  Serial.print("  -> ");
+  String candidate = classify(sR, sG, sB);
 
-  // ---- BLACK detection (treat as a real color) ----
-  // If total reflection is very low, it's black (or extremely dark)
-  if (total <= BLACK_TOTAL_MAX || total < MIN_TOTAL_INTENSITY) {
-    Serial.println("BLACK");
-    delay(500);
-    return;
+  // Stability filter: only announce if repeated STABLE_COUNT times
+  if (candidate == lastCandidate) sameCount++;
+  else { lastCandidate = candidate; sameCount = 1; }
+
+  // Debug (optional)
+  Serial.print("sR="); Serial.print(sR, 2);
+  Serial.print(" sG="); Serial.print(sG, 2);
+  Serial.print(" sB="); Serial.print(sB, 2);
+  Serial.print(" -> ");
+
+  if (sameCount >= STABLE_COUNT) {
+    Serial.println(candidate);     // stable output
+  } else {
+    Serial.println("...");         // not stable yet
   }
 
-  // Convert to ratios (shade tolerant)
-  float rRatio = (float)red / total;
-  float gRatio = (float)green / total;
-  float bRatio = (float)blue / total;
-
-  // Decide which color is dominant
-  if (rRatio > gRatio * DOMINANCE_RATIO && rRatio > bRatio * DOMINANCE_RATIO) {
-    Serial.println("RED");
-  }
-  else if (gRatio > rRatio * DOMINANCE_RATIO && gRatio > bRatio * DOMINANCE_RATIO) {
-    Serial.println("GREEN");
-  }
-  else if (bRatio > rRatio * DOMINANCE_RATIO && bRatio > gRatio * DOMINANCE_RATIO) {
-    Serial.println("BLUE");
-  }
-  else {
-    Serial.println("UNKNOWN");
-  }
-
-  delay(500);
+  delay(150);
 }
