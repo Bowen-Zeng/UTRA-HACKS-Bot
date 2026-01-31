@@ -5,10 +5,11 @@
 #define sensorOut 2
 
 // ---- Tuning knobs ----
-#define CONFIDENCE_RATIO 1.12        // lower = easier to call RGB colors
-#define BLACK_INTENSITY_MAX 3.30     // raise a bit because your black intensity ~2.3–3.0
-#define NEUTRAL_SIMILAR_RATIO 1.35   // higher = more tolerant that R/G/B are "similar" for black
-#define STABLE_COUNT 3               // must see same result this many times before printing
+#define CONFIDENCE_RATIO 1.12       // lower = easier RGB detection, higher = stricter
+#define NEUTRAL_SIMILAR_RATIO 1.30  // higher = more tolerant for WHITE/BLACK neutrality
+#define BLACK_INTENSITY_MAX 3.30    // your black intensity was ~2.3–3.0, so this is reasonable
+#define WHITE_INTENSITY_MIN 7.50    // your white intensity was ~8.5; set slightly below that
+#define STABLE_COUNT 3
 
 unsigned long readPulse(int s2, int s3) {
   digitalWrite(S2, s2);
@@ -39,22 +40,25 @@ String classify(float sR, float sG, float sB) {
   float maxS = max(sR, max(sG, sB));
   float minS = min(sR, min(sG, sB));
 
-  // BLACK: overall low-ish intensity + channels pretty similar
-  if (intensity <= BLACK_INTENSITY_MAX && maxS <= minS * NEUTRAL_SIMILAR_RATIO) {
-    return "BLACK";
-  }
+  bool neutral = (maxS <= minS * NEUTRAL_SIMILAR_RATIO);
 
-  // Find winner + second
+  // BLACK: low intensity + neutral
+  if (neutral && intensity <= BLACK_INTENSITY_MAX) return "BLACK";
+
+  // WHITE: high intensity + neutral
+  if (neutral && intensity >= WHITE_INTENSITY_MIN) return "WHITE";
+
+  // RGB: needs dominance + confidence
+  // Find winner and second place
   float max1 = sR, max2 = sG;
   char winner = 'R';
 
-  if (sG > max1) { winner = 'G'; max2 = max1; max1 = sG; }
-  else { max2 = sG; }
+  if (sG > max1) { winner='G'; max2=max1; max1=sG; }
+  else { max2=sG; }
 
-  if (sB > max1) { winner = 'B'; max2 = max1; max1 = sB; }
-  else if (sB > max2) { max2 = sB; }
+  if (sB > max1) { winner='B'; max2=max1; max1=sB; }
+  else if (sB > max2) { max2=sB; }
 
-  // Require confidence gap (prevents "default red")
   if (max1 < max2 * CONFIDENCE_RATIO) return "UNKNOWN";
 
   if (winner == 'R') return "RED";
@@ -72,7 +76,7 @@ void setup() {
 
   Serial.begin(9600);
 
-  Serial.println("Put WHITE under sensor (keep same distance). Calibrating...");
+  Serial.println("Put WHITE under sensor at your FINAL distance. Calibrating...");
   delay(800);
 
   // Your confirmed mapping:
@@ -88,33 +92,29 @@ void setup() {
 }
 
 void loop() {
-  // Current pulses
   unsigned long pR = avgPulse(LOW,  LOW, 10);
   unsigned long pB = avgPulse(LOW,  HIGH, 10);
   unsigned long pG = avgPulse(HIGH, HIGH, 10);
 
-  // Normalized strengths (bigger = stronger)
   float sR = (float)wR / (float)pR;
   float sG = (float)wG / (float)pG;
   float sB = (float)wB / (float)pB;
 
+  float intensity = sR + sG + sB;
+
   String candidate = classify(sR, sG, sB);
 
-  // Stability filter: only announce if repeated STABLE_COUNT times
   if (candidate == lastCandidate) sameCount++;
   else { lastCandidate = candidate; sameCount = 1; }
 
-  // Debug (optional)
   Serial.print("sR="); Serial.print(sR, 2);
   Serial.print(" sG="); Serial.print(sG, 2);
   Serial.print(" sB="); Serial.print(sB, 2);
+  Serial.print(" intensity="); Serial.print(intensity, 2);
   Serial.print(" -> ");
 
-  if (sameCount >= STABLE_COUNT) {
-    Serial.println(candidate);     // stable output
-  } else {
-    Serial.println("...");         // not stable yet
-  }
+  if (sameCount >= STABLE_COUNT) Serial.println(candidate);
+  else Serial.println("...");
 
   delay(150);
 }
