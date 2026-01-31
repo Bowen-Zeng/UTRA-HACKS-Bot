@@ -4,12 +4,9 @@
 #define S3 7
 #define sensorOut 2
 
-// If CLEAR pulse gets bigger than this, it's dark/black.
-// You MUST tune this after testing black paper/tape.
-#define BLACK_CLEAR_PULSE_THRESH 200
-
-// How much better the winning color must be (bigger = stricter)
-#define DOMINANCE_RATIO 1.15
+// Tuning knobs (you can tweak after you see output)
+#define CONFIDENCE_RATIO 1.15    // lower = more willing to label colors; higher = stricter
+#define BLACK_BRIGHTNESS_MAX 0.55 // <= this (vs white) counts as BLACK
 
 unsigned long readPulse(int s2, int s3) {
   digitalWrite(S2, s2);
@@ -18,57 +15,94 @@ unsigned long readPulse(int s2, int s3) {
   return pulseIn(sensorOut, LOW, 30000);
 }
 
+unsigned long avgPulse(int s2, int s3, int samples=10) {
+  unsigned long sum = 0;
+  for (int i=0; i<samples; i++) {
+    unsigned long p = readPulse(s2, s3);
+    if (p == 0) p = 30000; // avoid divide-by-zero
+    sum += p;
+    delay(5);
+  }
+  return sum / samples;
+}
+
+// Your confirmed mapping:
+unsigned long pR, pG, pB, pC;
+unsigned long wR, wG, wB, wC; // "white reference"
+
 void setup() {
   pinMode(S0, OUTPUT); pinMode(S1, OUTPUT);
   pinMode(S2, OUTPUT); pinMode(S3, OUTPUT);
   pinMode(sensorOut, INPUT);
 
-  // Frequency scaling (common)
   digitalWrite(S0, HIGH);
-  digitalWrite(S1, LOW);
+  digitalWrite(S1, LOW); // frequency scaling
 
   Serial.begin(9600);
+
+  // ---- Calibrate on WHITE ----
+  Serial.println("Put WHITE under sensor. Calibrating...");
+  delay(800);
+
+  wR = avgPulse(LOW,  LOW);
+  wB = avgPulse(LOW,  HIGH);
+  wC = avgPulse(HIGH, LOW);   // CLEAR
+  wG = avgPulse(HIGH, HIGH);
+
+  Serial.print("WHITE ref pulses: wR="); Serial.print(wR);
+  Serial.print(" wG="); Serial.print(wG);
+  Serial.print(" wB="); Serial.print(wB);
+  Serial.print(" wC="); Serial.println(wC);
+
+  Serial.println("Done. Now show colors/black.");
 }
 
 void loop() {
-  // Correct filter modes for YOUR sensor:
-  unsigned long pRed   = readPulse(LOW,  LOW);   // 00 = RED
-  unsigned long pBlue  = readPulse(LOW,  HIGH);  // 01 = BLUE
-  unsigned long pClear = readPulse(HIGH, LOW);   // 10 = CLEAR
-  unsigned long pGreen = readPulse(HIGH, HIGH);  // 11 = GREEN
+  // Read current pulses (average a bit to reduce noise)
+  pR = avgPulse(LOW,  LOW, 6);
+  pB = avgPulse(LOW,  HIGH, 6);
+  pC = avgPulse(HIGH, LOW, 6);
+  pG = avgPulse(HIGH, HIGH, 6);
 
-  Serial.print("00(R)="); Serial.print(pRed);
-  Serial.print(" 01(B)="); Serial.print(pBlue);
-  Serial.print(" 10(CLEAR)="); Serial.print(pClear);
-  Serial.print(" 11(G)="); Serial.print(pGreen);
-  Serial.print("  -> ");
+  // Convert pulse -> strength (smaller pulse means stronger)
+  // Normalize by WHITE so brightness differences/shades don’t break detection.
+  float sR = (float)wR / (float)pR;
+  float sG = (float)wG / (float)pG;
+  float sB = (float)wB / (float)pB;
+  float brightness = (float)wC / (float)pC; // 1.0-ish on white, smaller on darker surfaces
 
-  // ---- BLACK detection using clear ----
-  if (pClear > BLACK_CLEAR_PULSE_THRESH) {
+  Serial.print("sR="); Serial.print(sR, 2);
+  Serial.print(" sG="); Serial.print(sG, 2);
+  Serial.print(" sB="); Serial.print(sB, 2);
+  Serial.print(" bright="); Serial.print(brightness, 2);
+  Serial.print(" -> ");
+
+  // ---- BLACK detection (relative to white) ----
+  if (brightness <= BLACK_BRIGHTNESS_MAX) {
     Serial.println("BLACK");
-    delay(300);
+    delay(250);
     return;
   }
 
-  // Convert pulses to "strength" (smaller pulse => stronger color)
-  // strength = 1 / pulse
-  float sR = 1.0 / (float)pRed;
-  float sG = 1.0 / (float)pGreen;
-  float sB = 1.0 / (float)pBlue;
+  // ---- Color detection with confidence (prevents “default red”) ----
+  // Find max and second max
+  float max1 = sR, max2 = -1;
+  char winner = 'R';
 
-  // Determine dominant color with a little tolerance
-  if (sR > sG * DOMINANCE_RATIO && sR > sB * DOMINANCE_RATIO) {
-    Serial.println("RED");
-  }
-  else if (sG > sR * DOMINANCE_RATIO && sG > sB * DOMINANCE_RATIO) {
-    Serial.println("GREEN");
-  }
-  else if (sB > sR * DOMINANCE_RATIO && sB > sG * DOMINANCE_RATIO) {
-    Serial.println("BLUE");
-  }
-  else {
-    Serial.println("UNKNOWN / MIXED");
+  if (sG > max1) { max2 = max1; max1 = sG; winner = 'G'; }
+  else max2 = sG;
+
+  if (sB > max1) { max2 = max1; max1 = sB; winner = 'B'; }
+  else if (sB > max2) max2 = sB;
+
+  // Require the winner to be clearly above second place
+  if (max1 < max2 * CONFIDENCE_RATIO) {
+    Serial.println("UNKNOWN");
+  } else {
+    if (winner == 'R') Serial.println("RED");
+    else if (winner == 'G') Serial.println("GREEN");
+    else Serial.println("BLUE");
   }
 
-  delay(300);
+  delay(250);
 }
