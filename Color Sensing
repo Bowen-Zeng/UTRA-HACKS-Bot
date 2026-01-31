@@ -4,31 +4,63 @@
 #define S3 7
 #define sensorOut 2
 
-// Tuning knobs (you can tweak after you see output)
-#define CONFIDENCE_RATIO 1.15    // lower = more willing to label colors; higher = stricter
-#define BLACK_BRIGHTNESS_MAX 0.55 // <= this (vs white) counts as BLACK
+// ---- Tuning knobs ----
+#define CONFIDENCE_RATIO 1.12        // lower = easier to call RGB colors
+#define BLACK_INTENSITY_MAX 3.30     // raise a bit because your black intensity ~2.3–3.0
+#define NEUTRAL_SIMILAR_RATIO 1.35   // higher = more tolerant that R/G/B are "similar" for black
+#define STABLE_COUNT 3               // must see same result this many times before printing
 
 unsigned long readPulse(int s2, int s3) {
   digitalWrite(S2, s2);
   digitalWrite(S3, s3);
-  delay(5);
+  delay(3);
   return pulseIn(sensorOut, LOW, 30000);
 }
 
 unsigned long avgPulse(int s2, int s3, int samples=10) {
   unsigned long sum = 0;
-  for (int i=0; i<samples; i++) {
+  for (int i = 0; i < samples; i++) {
     unsigned long p = readPulse(s2, s3);
-    if (p == 0) p = 30000; // avoid divide-by-zero
+    if (p == 0) p = 30000;
     sum += p;
-    delay(5);
   }
   return sum / samples;
 }
 
-// Your confirmed mapping:
-unsigned long pR, pG, pB, pC;
-unsigned long wR, wG, wB, wC; // "white reference"
+// White reference pulses
+unsigned long wR, wG, wB;
+
+String lastCandidate = "";
+int sameCount = 0;
+
+String classify(float sR, float sG, float sB) {
+  float intensity = sR + sG + sB;
+
+  float maxS = max(sR, max(sG, sB));
+  float minS = min(sR, min(sG, sB));
+
+  // BLACK: overall low-ish intensity + channels pretty similar
+  if (intensity <= BLACK_INTENSITY_MAX && maxS <= minS * NEUTRAL_SIMILAR_RATIO) {
+    return "BLACK";
+  }
+
+  // Find winner + second
+  float max1 = sR, max2 = sG;
+  char winner = 'R';
+
+  if (sG > max1) { winner = 'G'; max2 = max1; max1 = sG; }
+  else { max2 = sG; }
+
+  if (sB > max1) { winner = 'B'; max2 = max1; max1 = sB; }
+  else if (sB > max2) { max2 = sB; }
+
+  // Require confidence gap (prevents "default red")
+  if (max1 < max2 * CONFIDENCE_RATIO) return "UNKNOWN";
+
+  if (winner == 'R') return "RED";
+  if (winner == 'G') return "GREEN";
+  return "BLUE";
+}
 
 void setup() {
   pinMode(S0, OUTPUT); pinMode(S1, OUTPUT);
@@ -36,73 +68,53 @@ void setup() {
   pinMode(sensorOut, INPUT);
 
   digitalWrite(S0, HIGH);
-  digitalWrite(S1, LOW); // frequency scaling
+  digitalWrite(S1, LOW);
 
   Serial.begin(9600);
 
-  // ---- Calibrate on WHITE ----
-  Serial.println("Put WHITE under sensor. Calibrating...");
+  Serial.println("Put WHITE under sensor (keep same distance). Calibrating...");
   delay(800);
 
-  wR = avgPulse(LOW,  LOW);
-  wB = avgPulse(LOW,  HIGH);
-  wC = avgPulse(HIGH, LOW);   // CLEAR
-  wG = avgPulse(HIGH, HIGH);
+  // Your confirmed mapping:
+  wR = avgPulse(LOW,  LOW);    // 00 = RED
+  wB = avgPulse(LOW,  HIGH);   // 01 = BLUE
+  wG = avgPulse(HIGH, HIGH);   // 11 = GREEN
 
   Serial.print("WHITE ref pulses: wR="); Serial.print(wR);
   Serial.print(" wG="); Serial.print(wG);
-  Serial.print(" wB="); Serial.print(wB);
-  Serial.print(" wC="); Serial.println(wC);
+  Serial.print(" wB="); Serial.println(wB);
 
-  Serial.println("Done. Now show colors/black.");
+  Serial.println("Done.");
 }
 
 void loop() {
-  // Read current pulses (average a bit to reduce noise)
-  pR = avgPulse(LOW,  LOW, 6);
-  pB = avgPulse(LOW,  HIGH, 6);
-  pC = avgPulse(HIGH, LOW, 6);
-  pG = avgPulse(HIGH, HIGH, 6);
+  // Current pulses
+  unsigned long pR = avgPulse(LOW,  LOW, 10);
+  unsigned long pB = avgPulse(LOW,  HIGH, 10);
+  unsigned long pG = avgPulse(HIGH, HIGH, 10);
 
-  // Convert pulse -> strength (smaller pulse means stronger)
-  // Normalize by WHITE so brightness differences/shades don’t break detection.
+  // Normalized strengths (bigger = stronger)
   float sR = (float)wR / (float)pR;
   float sG = (float)wG / (float)pG;
   float sB = (float)wB / (float)pB;
-  float brightness = (float)wC / (float)pC; // 1.0-ish on white, smaller on darker surfaces
 
+  String candidate = classify(sR, sG, sB);
+
+  // Stability filter: only announce if repeated STABLE_COUNT times
+  if (candidate == lastCandidate) sameCount++;
+  else { lastCandidate = candidate; sameCount = 1; }
+
+  // Debug (optional)
   Serial.print("sR="); Serial.print(sR, 2);
   Serial.print(" sG="); Serial.print(sG, 2);
   Serial.print(" sB="); Serial.print(sB, 2);
-  Serial.print(" bright="); Serial.print(brightness, 2);
   Serial.print(" -> ");
 
-  // ---- BLACK detection (relative to white) ----
-  if (brightness <= BLACK_BRIGHTNESS_MAX) {
-    Serial.println("BLACK");
-    delay(250);
-    return;
-  }
-
-  // ---- Color detection with confidence (prevents “default red”) ----
-  // Find max and second max
-  float max1 = sR, max2 = -1;
-  char winner = 'R';
-
-  if (sG > max1) { max2 = max1; max1 = sG; winner = 'G'; }
-  else max2 = sG;
-
-  if (sB > max1) { max2 = max1; max1 = sB; winner = 'B'; }
-  else if (sB > max2) max2 = sB;
-
-  // Require the winner to be clearly above second place
-  if (max1 < max2 * CONFIDENCE_RATIO) {
-    Serial.println("UNKNOWN");
+  if (sameCount >= STABLE_COUNT) {
+    Serial.println(candidate);     // stable output
   } else {
-    if (winner == 'R') Serial.println("RED");
-    else if (winner == 'G') Serial.println("GREEN");
-    else Serial.println("BLUE");
+    Serial.println("...");         // not stable yet
   }
 
-  delay(250);
+  delay(150);
 }
