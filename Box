@@ -1,1 +1,13 @@
+#include <Servo.h>
 
+Servo gripper;
+Servo shooter;
+
+void gripOpen()  { gripper.write(30); }
+void gripClose() { gripper.write(90); }
+
+void shoot() {
+  shooter.write(40);
+  delay(200);
+  shooter.write(120);
+}
