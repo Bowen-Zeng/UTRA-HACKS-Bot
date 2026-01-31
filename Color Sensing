@@ -1,51 +1,29 @@
-//Setting pins
 #define S0 8
 #define S1 9
 #define S2 6
 #define S3 7
 #define sensorOut 2
 
-//Calibrating the bounds for the colours
-#define RED_LOW_PARA    40
-#define RED_HIGH_PARA   200
-#define GREEN_LOW_PARA  50
-#define GREEN_HIGH_PARA 300
-#define BLUE_LOW_PARA   50
-#define BLUE_HIGH_PARA  300
+// If CLEAR pulse gets bigger than this, it's dark/black.
+// You MUST tune this after testing black paper/tape.
+#define BLACK_CLEAR_PULSE_THRESH 200
 
-// Detection tuning
-#define BLACK_TOTAL_MAX      120   // <= this => BLACK (tune using Serial Monitor)
-#define MIN_TOTAL_INTENSITY  80    // if total is very low, treat as BLACK/NOISE (tune)
-#define DOMINANCE_RATIO      1.25  // bigger = stricter, smaller = more tolerant
+// How much better the winning color must be (bigger = stricter)
+#define DOMINANCE_RATIO 1.15
 
-int red = 0;
-int green = 0;
-int blue = 0;
-
-int readColorMapped(int s2, int s3, int highPara, int lowPara) {
+unsigned long readPulse(int s2, int s3) {
   digitalWrite(S2, s2);
   digitalWrite(S3, s3);
-
-  unsigned long pulse = pulseIn(sensorOut, LOW, 30000); // 30ms timeout
-  if (pulse == 0) return 0; // No signal detected
-
-  int val = map((int)pulse, highPara, lowPara, 255, 0);
-
-  // Safety clamp
-  if (val < 0) val = 0;
-  if (val > 255) val = 255;
-
-  return val;
+  delay(5);
+  return pulseIn(sensorOut, LOW, 30000);
 }
 
 void setup() {
-  pinMode(S0, OUTPUT);
-  pinMode(S1, OUTPUT);
-  pinMode(S2, OUTPUT);
-  pinMode(S3, OUTPUT);
+  pinMode(S0, OUTPUT); pinMode(S1, OUTPUT);
+  pinMode(S2, OUTPUT); pinMode(S3, OUTPUT);
   pinMode(sensorOut, INPUT);
 
-  // Frequency scaling (common: S0 HIGH, S1 LOW)
+  // Frequency scaling (common)
   digitalWrite(S0, HIGH);
   digitalWrite(S1, LOW);
 
@@ -53,49 +31,44 @@ void setup() {
 }
 
 void loop() {
-  // Read RGB mapped values (0..255)
-  red   = readColorMapped(LOW,  LOW,  RED_HIGH_PARA,   RED_LOW_PARA);
-  delay(50);
-  green = readColorMapped(HIGH, HIGH, GREEN_HIGH_PARA, GREEN_LOW_PARA);
-  delay(50);
-  blue  = readColorMapped(LOW,  HIGH, BLUE_HIGH_PARA,  BLUE_LOW_PARA);
-  delay(50);
+  // Correct filter modes for YOUR sensor:
+  unsigned long pRed   = readPulse(LOW,  LOW);   // 00 = RED
+  unsigned long pBlue  = readPulse(LOW,  HIGH);  // 01 = BLUE
+  unsigned long pClear = readPulse(HIGH, LOW);   // 10 = CLEAR
+  unsigned long pGreen = readPulse(HIGH, HIGH);  // 11 = GREEN
 
-  int total = red + green + blue;
-
-  // OPTIONAL: keep this if you want to debug readings
-  Serial.print("R="); Serial.print(red);
-  Serial.print(" G="); Serial.print(green);
-  Serial.print(" B="); Serial.print(blue);
-  Serial.print(" total="); Serial.print(total);
+  Serial.print("00(R)="); Serial.print(pRed);
+  Serial.print(" 01(B)="); Serial.print(pBlue);
+  Serial.print(" 10(CLEAR)="); Serial.print(pClear);
+  Serial.print(" 11(G)="); Serial.print(pGreen);
   Serial.print("  -> ");
 
-  // ---- BLACK detection (treat as a real color) ----
-  // If total reflection is very low, it's black (or extremely dark)
-  if (total <= BLACK_TOTAL_MAX || total < MIN_TOTAL_INTENSITY) {
+  // ---- BLACK detection using clear ----
+  if (pClear > BLACK_CLEAR_PULSE_THRESH) {
     Serial.println("BLACK");
-    delay(500);
+    delay(300);
     return;
   }
 
-  // Convert to ratios (shade tolerant)
-  float rRatio = (float)red / total;
-  float gRatio = (float)green / total;
-  float bRatio = (float)blue / total;
+  // Convert pulses to "strength" (smaller pulse => stronger color)
+  // strength = 1 / pulse
+  float sR = 1.0 / (float)pRed;
+  float sG = 1.0 / (float)pGreen;
+  float sB = 1.0 / (float)pBlue;
 
-  // Decide which color is dominant
-  if (rRatio > gRatio * DOMINANCE_RATIO && rRatio > bRatio * DOMINANCE_RATIO) {
+  // Determine dominant color with a little tolerance
+  if (sR > sG * DOMINANCE_RATIO && sR > sB * DOMINANCE_RATIO) {
     Serial.println("RED");
   }
-  else if (gRatio > rRatio * DOMINANCE_RATIO && gRatio > bRatio * DOMINANCE_RATIO) {
+  else if (sG > sR * DOMINANCE_RATIO && sG > sB * DOMINANCE_RATIO) {
     Serial.println("GREEN");
   }
-  else if (bRatio > rRatio * DOMINANCE_RATIO && bRatio > gRatio * DOMINANCE_RATIO) {
+  else if (sB > sR * DOMINANCE_RATIO && sB > sG * DOMINANCE_RATIO) {
     Serial.println("BLUE");
   }
   else {
-    Serial.println("UNKNOWN");
+    Serial.println("UNKNOWN / MIXED");
   }
 
-  delay(500);
+  delay(300);
 }
