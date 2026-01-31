@@ -1,22 +1,101 @@
-int readColor() {
-  // Placeholder calibration values
-  int r, g, b;
+//Setting pins
+#define S0 8
+#define S1 9
+#define S2 6
+#define S3 7
+#define sensorOut 2
 
-  digitalWrite(COLOR_S2, LOW);
-  digitalWrite(COLOR_S3, LOW);
-  r = pulseIn(COLOR_OUT, LOW);
+//Calibrating the bounds for the colours
+#define RED_LOW_PARA    40
+#define RED_HIGH_PARA   200
+#define GREEN_LOW_PARA  50
+#define GREEN_HIGH_PARA 300
+#define BLUE_LOW_PARA   50
+#define BLUE_HIGH_PARA  300
 
-  digitalWrite(COLOR_S2, HIGH);
-  digitalWrite(COLOR_S3, HIGH);
-  g = pulseIn(COLOR_OUT, LOW);
+// Detection tuning
+#define BLACK_TOTAL_MAX      120   // <= this => BLACK (tune using Serial Monitor)
+#define MIN_TOTAL_INTENSITY  80    // if total is very low, treat as BLACK/NOISE (tune)
+#define DOMINANCE_RATIO      1.25  // bigger = stricter, smaller = more tolerant
 
-  digitalWrite(COLOR_S2, LOW);
-  digitalWrite(COLOR_S3, HIGH);
-  b = pulseIn(COLOR_OUT, LOW);
+int red = 0;
+int green = 0;
+int blue = 0;
 
-  if (r < g && r < b) return 1;  // RED
-  if (g < r && g < b) return 2;  // GREEN
-  if (b < r && b < g) return 3;  // BLUE
-  if (r + g + b < 150) return 4; // BLACK
-  return 0;
+int readColorMapped(int s2, int s3, int highPara, int lowPara) {
+  digitalWrite(S2, s2);
+  digitalWrite(S3, s3);
+
+  unsigned long pulse = pulseIn(sensorOut, LOW, 30000); // 30ms timeout
+  if (pulse == 0) return 0; // No signal detected
+
+  int val = map((int)pulse, highPara, lowPara, 255, 0);
+
+  // Safety clamp
+  if (val < 0) val = 0;
+  if (val > 255) val = 255;
+
+  return val;
+}
+
+void setup() {
+  pinMode(S0, OUTPUT);
+  pinMode(S1, OUTPUT);
+  pinMode(S2, OUTPUT);
+  pinMode(S3, OUTPUT);
+  pinMode(sensorOut, INPUT);
+
+  // Frequency scaling (common: S0 HIGH, S1 LOW)
+  digitalWrite(S0, HIGH);
+  digitalWrite(S1, LOW);
+
+  Serial.begin(9600);
+}
+
+void loop() {
+  // Read RGB mapped values (0..255)
+  red   = readColorMapped(LOW,  LOW,  RED_HIGH_PARA,   RED_LOW_PARA);
+  delay(50);
+  green = readColorMapped(HIGH, HIGH, GREEN_HIGH_PARA, GREEN_LOW_PARA);
+  delay(50);
+  blue  = readColorMapped(LOW,  HIGH, BLUE_HIGH_PARA,  BLUE_LOW_PARA);
+  delay(50);
+
+  int total = red + green + blue;
+
+  // OPTIONAL: keep this if you want to debug readings
+  Serial.print("R="); Serial.print(red);
+  Serial.print(" G="); Serial.print(green);
+  Serial.print(" B="); Serial.print(blue);
+  Serial.print(" total="); Serial.print(total);
+  Serial.print("  -> ");
+
+  // ---- BLACK detection (treat as a real color) ----
+  // If total reflection is very low, it's black (or extremely dark)
+  if (total <= BLACK_TOTAL_MAX || total < MIN_TOTAL_INTENSITY) {
+    Serial.println("BLACK");
+    delay(500);
+    return;
+  }
+
+  // Convert to ratios (shade tolerant)
+  float rRatio = (float)red / total;
+  float gRatio = (float)green / total;
+  float bRatio = (float)blue / total;
+
+  // Decide which color is dominant
+  if (rRatio > gRatio * DOMINANCE_RATIO && rRatio > bRatio * DOMINANCE_RATIO) {
+    Serial.println("RED");
+  }
+  else if (gRatio > rRatio * DOMINANCE_RATIO && gRatio > bRatio * DOMINANCE_RATIO) {
+    Serial.println("GREEN");
+  }
+  else if (bRatio > rRatio * DOMINANCE_RATIO && bRatio > gRatio * DOMINANCE_RATIO) {
+    Serial.println("BLUE");
+  }
+  else {
+    Serial.println("UNKNOWN");
+  }
+
+  delay(500);
 }
