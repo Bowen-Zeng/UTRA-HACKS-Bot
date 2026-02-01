@@ -1,32 +1,106 @@
+// GLOBAL VARIABLES ---------------------------------------------
+// colors: 0 = unknown, 1 = ..., 2 = black, 3 = red, 4 = green, 5 = blue
 int stage = 0;
+bool sawObstacle = false;
 
-// STAGE 0
-int sawRed = false;
+// --- PIN DEFINITIONS ---
+// Left Motor (A)
+const int enA = 3;  // Speed Control
+const int in1 = A0;   // Direction
+const int in2 = A1;   // Direction
 
-// STAGE 1
-int sawObstacle = false;
-int sawBlack = false;
+// Right Motor (B)
+const int enB = 5;   // Speed Control
+const int in3 = A2;   // Direction
+const int in4 = A3;   // Direction
 
+// Ultrasonic Sensor
+const int trigPin = 10;
+const int echoPin = 11;
+
+// SETUP ---------------------------------------------------------
 void setup() {
-  // put your setup code here, to run once:
+  // Set all the motor control pins to outputs
+  pinMode(enA, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  pinMode(enB, OUTPUT);
+  pinMode(in3, OUTPUT);
+  pinMode(in4, OUTPUT);
 
+  // Ultrasonic sensor
+  pinMode(trigPin, OUTPUT); // Sets the trigPin as an Output
+  pinMode(echoPin, INPUT);  // Sets the echoPin as an Input
+  Serial.begin(9600);       // For debugging
 }
 
-void veerToRedHardCode() {
-  // hard code general direction
-  startRightWheel(200);
-  startLeftWheel(150);
-  delay(2000);
-}
+// HELPER FUNCTIONS -----------------------------------------------
 
-void veerToRed() {
-  // try to get back on track
-  int left = digitalRead(leftIR);
-  int right = digitalRead(rightIR);
-  if (left == 0 && right == 1) {
-    sawRed = false;
-    stage = 1;
+void startLeftWheel(int vel) { // -255 - 255
+  if (vel < 0) {
+    digitalWrite(in1, LOW);
+    digitalWrite(in2, HIGH);
+    analogWrite(enA, abs(vel));
+  } else {
+    digitalWrite(in1, HIGH);
+    digitalWrite(in2, LOW);
+    analogWrite(enA, abs(vel));
   }
+}
+
+void startRightWheel(int vel) { // -255 - 255
+  if (vel < 0) {
+    digitalWrite(in3, LOW);
+    digitalWrite(in4, HIGH);
+    analogWrite(enB, abs(vel));
+  } else {
+    digitalWrite(in3, HIGH);
+    digitalWrite(in4, LOW);
+    analogWrite(enB, abs(vel));
+  }
+}
+
+void stopLeftWheel() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+}
+
+void stopRightWheel() {
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+}
+
+
+int getCurrentColor();
+
+void followLine(int targetColor, int prevLeft, int prevRight) {
+  int currentColor = getCurrentColor();
+  if (currentColor == targetColor) {
+    startLeftWheel(prevLeft);
+    startRightWheel(prevRight);
+  } else {
+    startRightWheel(prevLeft);
+    startLeftWheel(prevRight);
+  }
+}
+
+long getDistance() {
+  // 1. Clear the trigPin
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  
+  // 2. Trigger the sensor by sending a 10 microsecond pulse
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  
+  // 3. Read the echoPin (returns the sound wave travel time in microseconds)
+  long duration = pulseIn(echoPin, HIGH);
+  
+  // 4. Calculate the distance in centimeters
+  long distanceCm = duration * 0.034 / 2;
+  
+  return distanceCm;
 }
 
 void veerAroundObstacleHardCode() {
@@ -40,72 +114,52 @@ void veerAroundObstacleHardCode() {
   delay(2000);
 }
 
-void veerAroundObstacle() {
+void veerAroundObstacle(int targetColor) {
   // try to get back on track
-  int left = digitalRead(leftIR);
-  int right = digitalRead(rightIR);
-  if (left == 0 && right == 1) {
+  int currentColor = getCurrentColor();
+  if (currentColor == targetColor) {
     sawObstacle = false;
   }
 }
 
-void veerToGreenHardCode() {
-  // turn left
-  stopLeftWheel();
-  startRightWheel(200);
-}
+void handleBlock();
 
-void veerToGreen() {
-  // try to get back on track
-  int left = digitalRead(leftIR);
-  int right = digitalRead(rightIR);
-  if (left == 0 && right == 1) {
-    sawRed = false;
-    stage = 1;
-  }
-}
-
+// MAIN LOOP ------------------------------------------------------
 void loop() {
+  int currentColor = getCurrentColor(); // Read color once per loop
+  long dist = getDistance();     // Read distance once per loop
   if (stage == 0) {
 
     // ---- 0. BLACK PATH ----
-    if (seeRed()) {
-      sawRed = true;
-      veerToRedHardCode();
-    } else if (sawRed) {
-      veerToRed();
+    if (currentColor == 3) {        // switch to red path!
+      stage = 1
     } else {
-      followLine(); // change direction slightly to keep robot on track
+      followLine(2);                  // follow black path
     }
 
   } else if (stage == 1) {
 
     // ---- 1. RED PATH
-    if (seeBlueLine()) {
-      if (firstBlueLine == true) {
-        // hard code?? pick up block.
-      } else {
-        // hard code?? deposit block.x
-      }
-    } else if (seeObstacle()) {
+    if (currentColor == 5) {        // blue tape
+      handleBlock();
+    } else if (dist > 0 && dist < 30) {
       sawObstacle = true;
       veerAroundObstacleHardCode();
     } else if (sawObstacle) {
       veerAroundObstacle();
-    } else if (seeBlack()) {
-      sawBlack = true;
-      veerToGreenHardCode();
-    } else if (sawBlack) {
-      veerToGreen();
+    } else if (currentColor == 4) { // switch to green path!
+      stage = 2;
     } else {
-      followLine();
+      followLine(3);                  // follow red path
     }
     
   } else if (stage == 2) {
 
     // ---- 2. GREEN PATH ----
     // do something
-
+    followLine(4);                    // follow green path
   }
+
+  delay(100);
 }
 
