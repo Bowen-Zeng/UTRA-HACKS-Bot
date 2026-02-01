@@ -1,0 +1,111 @@
+int stage = 0;
+
+// STAGE 0
+int sawRed = false;
+
+// STAGE 1
+int sawObstacle = false;
+int sawBlack = false;
+
+void setup() {
+  // put your setup code here, to run once:
+
+}
+
+void veerToRedHardCode() {
+  // hard code general direction
+  startRightWheel(200);
+  startLeftWheel(150);
+  delay(2000);
+}
+
+void veerToRed() {
+  // try to get back on track
+  int left = digitalRead(leftIR);
+  int right = digitalRead(rightIR);
+  if (left == 0 && right == 1) {
+    sawRed = false;
+    stage = 1;
+  }
+}
+
+void veerAroundObstacleHardCode() {
+  // go right
+  startRightWheel(150);
+  startLeftWheel(200);
+  delay(2000);
+  // then go left
+  startRightWheel(200);
+  startLeftWheel(150);
+  delay(2000);
+}
+
+void veerAroundObstacle() {
+  // try to get back on track
+  int left = digitalRead(leftIR);
+  int right = digitalRead(rightIR);
+  if (left == 0 && right == 1) {
+    sawObstacle = false;
+  }
+}
+
+void veerToGreenHardCode() {
+  // turn left
+  stopLeftWheel();
+  startRightWheel(200);
+}
+
+void veerToGreen() {
+  // try to get back on track
+  int left = digitalRead(leftIR);
+  int right = digitalRead(rightIR);
+  if (left == 0 && right == 1) {
+    sawRed = false;
+    stage = 1;
+  }
+}
+
+void loop() {
+  if (stage == 0) {
+
+    // ---- 0. BLACK PATH ----
+    if (seeRed()) {
+      sawRed = true;
+      veerToRedHardCode();
+    } else if (sawRed) {
+      veerToRed();
+    } else {
+      followLine(); // change direction slightly to keep robot on track
+    }
+
+  } else if (stage == 1) {
+
+    // ---- 1. RED PATH
+    if (seeBlueLine()) {
+      if (firstBlueLine == true) {
+        // hard code?? pick up block.
+      } else {
+        // hard code?? deposit block.x
+      }
+    } else if (seeObstacle()) {
+      sawObstacle = true;
+      veerAroundObstacleHardCode();
+    } else if (sawObstacle) {
+      veerAroundObstacle();
+    } else if (seeBlack()) {
+      sawBlack = true;
+      veerToGreenHardCode();
+    } else if (sawBlack) {
+      veerToGreen();
+    } else {
+      followLine();
+    }
+    
+  } else if (stage == 2) {
+
+    // ---- 2. GREEN PATH ----
+    // do something
+
+  }
+}
+
