@@ -1,16 +1,25 @@
+// -------- TCS3200 Color Sensor (RGB + BLACK + WHITE) --------
+// Uses your confirmed filter mapping:
+// 00 (S2 LOW,  S3 LOW)  = RED
+// 01 (S2 LOW,  S3 HIGH) = BLUE
+// 11 (S2 HIGH, S3 HIGH) = GREEN
+// (10 is CLEAR, not needed in this version)
+
+// ---- Pins ----
 #define S0 8
 #define S1 9
 #define S2 6
 #define S3 7
 #define sensorOut 2
 
-// ---- Tuning knobs ----
-#define CONFIDENCE_RATIO 1.12       // lower = easier RGB detection, higher = stricter
-#define NEUTRAL_SIMILAR_RATIO 1.30  // higher = more tolerant for WHITE/BLACK neutrality
-#define BLACK_INTENSITY_MAX 3.30    // your black intensity was ~2.3–3.0, so this is reasonable
-#define WHITE_INTENSITY_MIN 7.50    // your white intensity was ~8.5; set slightly below that
-#define STABLE_COUNT 3
+// ---- Tuning knobs (based on your real data) ----
+#define CONFIDENCE_RATIO 1.12        // for RGB dominance; raise if mislabels, lower if too many UNKNOWN
+#define NEUTRAL_SIMILAR_RATIO 1.30   // higher = easier to call neutral (BLACK/WHITE)
+#define BLACK_INTENSITY_MAX 1.50     // only really dim neutrals are BLACK (your black was 0.40–1.17)
+#define WHITE_INTENSITY_MIN 2.60     // neutral surfaces brighter than this are WHITE (your “white spots” ~2.90)
+#define STABLE_COUNT 3               // must repeat same result this many loops before printing it
 
+// ---- Helpers ----
 unsigned long readPulse(int s2, int s3) {
   digitalWrite(S2, s2);
   digitalWrite(S3, s3);
@@ -18,11 +27,11 @@ unsigned long readPulse(int s2, int s3) {
   return pulseIn(sensorOut, LOW, 30000);
 }
 
-unsigned long avgPulse(int s2, int s3, int samples=10) {
+unsigned long avgPulse(int s2, int s3, int samples = 10) {
   unsigned long sum = 0;
   for (int i = 0; i < samples; i++) {
     unsigned long p = readPulse(s2, s3);
-    if (p == 0) p = 30000;
+    if (p == 0) p = 30000; // safety
     sum += p;
   }
   return sum / samples;
@@ -31,6 +40,7 @@ unsigned long avgPulse(int s2, int s3, int samples=10) {
 // White reference pulses
 unsigned long wR, wG, wB;
 
+// Stability filter
 String lastCandidate = "";
 int sameCount = 0;
 
@@ -39,26 +49,24 @@ String classify(float sR, float sG, float sB) {
 
   float maxS = max(sR, max(sG, sB));
   float minS = min(sR, min(sG, sB));
-
   bool neutral = (maxS <= minS * NEUTRAL_SIMILAR_RATIO);
 
-  // BLACK: low intensity + neutral
+  // --- Neutral detection first ---
   if (neutral && intensity <= BLACK_INTENSITY_MAX) return "BLACK";
-
-  // WHITE: high intensity + neutral
   if (neutral && intensity >= WHITE_INTENSITY_MIN) return "WHITE";
 
-  // RGB: needs dominance + confidence
+  // --- RGB dominance ---
   // Find winner and second place
   float max1 = sR, max2 = sG;
   char winner = 'R';
 
-  if (sG > max1) { winner='G'; max2=max1; max1=sG; }
-  else { max2=sG; }
+  if (sG > max1) { winner = 'G'; max2 = max1; max1 = sG; }
+  else { max2 = sG; }
 
-  if (sB > max1) { winner='B'; max2=max1; max1=sB; }
-  else if (sB > max2) { max2=sB; }
+  if (sB > max1) { winner = 'B'; max2 = max1; max1 = sB; }
+  else if (sB > max2) { max2 = sB; }
 
+  // Need a clear gap; otherwise don't guess
   if (max1 < max2 * CONFIDENCE_RATIO) return "UNKNOWN";
 
   if (winner == 'R') return "RED";
@@ -71,12 +79,14 @@ void setup() {
   pinMode(S2, OUTPUT); pinMode(S3, OUTPUT);
   pinMode(sensorOut, INPUT);
 
+  // Frequency scaling
   digitalWrite(S0, HIGH);
   digitalWrite(S1, LOW);
 
   Serial.begin(9600);
 
-  Serial.println("Put WHITE under sensor at your FINAL distance. Calibrating...");
+  // ---- Calibrate on WHITE (IMPORTANT: same distance + same "white" material you'll use) ----
+  Serial.println("Put WHITE under sensor at FINAL distance. Calibrating...");
   delay(800);
 
   // Your confirmed mapping:
@@ -87,26 +97,28 @@ void setup() {
   Serial.print("WHITE ref pulses: wR="); Serial.print(wR);
   Serial.print(" wG="); Serial.print(wG);
   Serial.print(" wB="); Serial.println(wB);
-
-  Serial.println("Done.");
+  Serial.println("Done. Now show colors.");
 }
 
 void loop() {
+  // Current pulses (averaged)
   unsigned long pR = avgPulse(LOW,  LOW, 10);
   unsigned long pB = avgPulse(LOW,  HIGH, 10);
   unsigned long pG = avgPulse(HIGH, HIGH, 10);
 
+  // Normalize to white: bigger strength = more of that color
   float sR = (float)wR / (float)pR;
   float sG = (float)wG / (float)pG;
   float sB = (float)wB / (float)pB;
-
   float intensity = sR + sG + sB;
 
   String candidate = classify(sR, sG, sB);
 
+  // Stability filter (prevents flicker)
   if (candidate == lastCandidate) sameCount++;
   else { lastCandidate = candidate; sameCount = 1; }
 
+  // Debug print values + stable label
   Serial.print("sR="); Serial.print(sR, 2);
   Serial.print(" sG="); Serial.print(sG, 2);
   Serial.print(" sB="); Serial.print(sB, 2);
