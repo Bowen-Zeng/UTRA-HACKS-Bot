@@ -1,9 +1,9 @@
 // GLOBAL VARIABLES ---------------------------------------------
-// colors: 0 = ..., 1 = unknown 2 = white, 3 = black, 4 = red, 5 = green, 6 = blue
-int stage = 0;
+// colors: 0 = not stable, 1 = unknown, 2 = white, 3 = black, 4 = red, 5 = green, 6 = blue
+int lastTurnDir = 1;      // 1 = turn right, -1 = turn left
+int speedStraight = 120;
+int speedFast = 150;
 int speedSlow = 60;
-int speedFast = 100;
-bool sawObstacle = false;
 
 // --- PIN DEFINITIONS ---
 // Left Motor (A)
@@ -16,9 +16,6 @@ const int enB = 5;   // Speed Control
 const int in3 = A2;   // Direction
 const int in4 = A3;   // Direction
 
-// Ultrasonic Sensor
-const int trigPin = 10;
-const int echoPin = 11;
 
 // -------- TCS3200 Color Sensor (RGB + BLACK + WHITE) --------
 // Uses your confirmed filter mapping:
@@ -156,60 +153,43 @@ int getCurrentColor() {
   }
 }
 
-void followLine(int targetColor, int currentColor) {
-  
-  if (currentColor == targetColor) { 
-    // Turn LEFT towards edge
-    startLeftWheel(speedSlow);
-    startRightWheel(speedFast);
-  } else {
-    // Turn RIGHT back to line
-    startLeftWheel(speedFast);
-    startRightWheel(speedSlow);
+// Memory-based line following for BLACK line
+// targetColor = 3 (black)
+void followBlackLine(int currentColor) {
+  if (currentColor == 3) {
+    // ON BLACK LINE - go straight
+    startLeftWheel(speedStraight);
+    startRightWheel(speedStraight);
+  } 
+  else if (currentColor == 2) {
+    // ON WHITE - we went too far off, reverse direction
+    lastTurnDir = -lastTurnDir;
+    if (lastTurnDir == 1) {
+      startLeftWheel(speedFast);
+      startRightWheel(speedSlow);
+    } else {
+      startLeftWheel(speedSlow);
+      startRightWheel(speedFast);
+    }
+  } 
+  else {
+    // UNKNOWN or not stable - keep turning same direction
+    if (lastTurnDir == 1) {
+      startLeftWheel(speedFast);
+      startRightWheel(speedSlow);
+    } else {
+      startLeftWheel(speedSlow);
+      startRightWheel(speedFast);
+    }
   }
 }
 
-long getDistance() {
-  // 1. Clear the trigPin
-  digitalWrite(trigPin, LOW);
-  delayMicroseconds(2);
-  
-  // 2. Trigger the sensor by sending a 10 microsecond pulse
-  digitalWrite(trigPin, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
-  
-  // 3. Read the echoPin (returns the sound wave travel time in microseconds)
-  long duration = pulseIn(echoPin, HIGH);
-  
-  // 4. Calculate the distance in centimeters
-  long distanceCm = duration * 0.034 / 2;
-  
-  return distanceCm;
-}
-
-void veerAroundObstacleHardCode() {
-  // go left
-  startRightWheel(200);
-  startLeftWheel(150);
-  delay(2000);
-  // then go right
-  startRightWheel(150);
-  startLeftWheel(200);
-}
-
-void veerAroundObstacle(int targetColor, int currentColor) {
-  // try to get back on track
-  if (currentColor == targetColor) {
-    sawObstacle = false;
-  }
-}
-
-// void handleBlock();
 
 // SETUP ---------------------------------------------------------
 void setup() {
-  // Set all the motor control pins to outputs
+  Serial.begin(9600);
+  
+  // Motor pins
   pinMode(enA, OUTPUT);
   pinMode(in1, OUTPUT);
   pinMode(in2, OUTPUT);
@@ -217,11 +197,7 @@ void setup() {
   pinMode(in3, OUTPUT);
   pinMode(in4, OUTPUT);
 
-  // Ultrasonic sensor
-  pinMode(trigPin, OUTPUT); // Sets the trigPin as an Output
-  pinMode(echoPin, INPUT);  // Sets the echoPin as an Input
-
-  // colors
+  // Color sensor pins
   pinMode(S0, OUTPUT); pinMode(S1, OUTPUT);
   pinMode(S2, OUTPUT); pinMode(S3, OUTPUT);
   pinMode(sensorOut, INPUT);
@@ -230,60 +206,28 @@ void setup() {
   digitalWrite(S0, HIGH);
   digitalWrite(S1, LOW);
 
-  // ---- Calibrate on WHITE (IMPORTANT: same distance + same "white" material you'll use) ----
-  Serial.println("Put WHITE under sensor at FINAL distance. Calibrating...");
-  delay(800);
+  // Calibrate on WHITE
+  Serial.println("Place WHITE surface under sensor. Calibrating...");
+  delay(1000);
 
-  // Your confirmed mapping:
-  wR = avgPulse(LOW,  LOW);    // 00 = RED
-  wB = avgPulse(LOW,  HIGH);   // 01 = BLUE
-  wG = avgPulse(HIGH, HIGH);   // 11 = GREEN
+  wR = avgPulse(LOW,  LOW);    // RED filter
+  wB = avgPulse(LOW,  HIGH);   // BLUE filter
+  wG = avgPulse(HIGH, HIGH);   // GREEN filter
 
-  Serial.print("WHITE ref pulses: wR="); Serial.print(wR);
+  Serial.print("Calibration done. wR="); Serial.print(wR);
   Serial.print(" wG="); Serial.print(wG);
   Serial.print(" wB="); Serial.println(wB);
-  Serial.println("Done. Now show colors.");
-
-  Serial.begin(9600);
+  Serial.println("Starting line following...");
+  delay(500);
 }
 
 // MAIN LOOP ------------------------------------------------------
 void loop() {
-  int currentColor = getCurrentColor(); // Read color once per loop
-  Serial.print(currentColor);
-  long dist = getDistance();     // Read distance once per loop
-  if (stage == 0) {
-
-    // ---- 0. BLACK PATH ----
-    if (currentColor == 3) {        // switch to red path!
-      stage = 1
-    } else {
-      followLine(2, currentColor);                  // follow black path
-    }
-
-  } else if (stage == 1) {
-
-    // ---- 1. RED PATH
-    if (currentColor == 5) {        // blue tape
-      handleBlock();
-    } else if (dist > 0 && dist < 30) {
-      sawObstacle = true;
-      veerAroundObstacleHardCode();
-    } else if (sawObstacle) {
-      veerAroundObstacle(3, currentColor);
-    } else if (currentColor == 4) { // switch to green path!
-      stage = 2;
-    } else {
-      followLine(3, currentColor);                  // follow red path
-    }
-    
-  } else if (stage == 2) {
-
-    // ---- 2. GREEN PATH ----
-    // do something
-    followLine(4, currentColor);                    // follow green path
-  }
-
-  delay(100);
+  int currentColor = getCurrentColor();
+  Serial.println(currentColor);
+  
+  // followBlackLine(currentColor);
+  
+  delay(50);
 }
 
