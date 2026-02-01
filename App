@@ -1,6 +1,8 @@
 // GLOBAL VARIABLES ---------------------------------------------
 // colors: 0 = ..., 1 = unknown 2 = white, 3 = black, 4 = red, 5 = green, 6 = blue
 int stage = 0;
+int speedSlow = 60;
+int speedFast = 100;
 bool sawObstacle = false;
 
 // --- PIN DEFINITIONS ---
@@ -43,48 +45,8 @@ const int echoPin = 11;
 unsigned long wR, wG, wB;
 
 // Stability filter
-String lastCandidate = "";
+int lastCandidate = 0;
 int sameCount = 0;
-
-// SETUP ---------------------------------------------------------
-void setup() {
-  // Set all the motor control pins to outputs
-  pinMode(enA, OUTPUT);
-  pinMode(in1, OUTPUT);
-  pinMode(in2, OUTPUT);
-  pinMode(enB, OUTPUT);
-  pinMode(in3, OUTPUT);
-  pinMode(in4, OUTPUT);
-
-  // Ultrasonic sensor
-  pinMode(trigPin, OUTPUT); // Sets the trigPin as an Output
-  pinMode(echoPin, INPUT);  // Sets the echoPin as an Input
-
-  // colors
-  pinMode(S0, OUTPUT); pinMode(S1, OUTPUT);
-  pinMode(S2, OUTPUT); pinMode(S3, OUTPUT);
-  pinMode(sensorOut, INPUT);
-
-  // Frequency scaling
-  digitalWrite(S0, HIGH);
-  digitalWrite(S1, LOW);
-
-  // ---- Calibrate on WHITE (IMPORTANT: same distance + same "white" material you'll use) ----
-  Serial.println("Put WHITE under sensor at FINAL distance. Calibrating...");
-  delay(800);
-
-  // Your confirmed mapping:
-  wR = avgPulse(LOW,  LOW);    // 00 = RED
-  wB = avgPulse(LOW,  HIGH);   // 01 = BLUE
-  wG = avgPulse(HIGH, HIGH);   // 11 = GREEN
-
-  Serial.print("WHITE ref pulses: wR="); Serial.print(wR);
-  Serial.print(" wG="); Serial.print(wG);
-  Serial.print(" wB="); Serial.println(wB);
-  Serial.println("Done. Now show colors.");
-
-  Serial.begin(9600);
-}
 
 // HELPER FUNCTIONS -----------------------------------------------
 
@@ -139,7 +101,7 @@ unsigned long avgPulse(int s2, int s3, int samples = 10) {
   return sum / samples;
 }
 
-String classify(float sR, float sG, float sB) {
+int classify(float sR, float sG, float sB) {
   float intensity = sR + sG + sB;
 
   float maxS = max(sR, max(sG, sB));
@@ -181,7 +143,7 @@ int getCurrentColor() {
   float sB = (float)wB / (float)pB;
   float intensity = sR + sG + sB;
 
-  String candidate = classify(sR, sG, sB);
+  int candidate = classify(sR, sG, sB);
 
   // Stability filter (prevents flicker)
   if (candidate == lastCandidate) sameCount++;
@@ -194,14 +156,16 @@ int getCurrentColor() {
   }
 }
 
-void followLine(int targetColor, int prevLeft, int prevRight) {
-  int currentColor = getCurrentColor();
-  if (currentColor == targetColor) {
-    startLeftWheel(prevLeft);
-    startRightWheel(prevRight);
+void followLine(int targetColor, int currentColor) {
+  
+  if (currentColor == targetColor) { 
+    // Turn LEFT towards edge
+    startLeftWheel(speedSlow);
+    startRightWheel(speedFast);
   } else {
-    startRightWheel(prevLeft);
-    startLeftWheel(prevRight);
+    // Turn RIGHT back to line
+    startLeftWheel(speedFast);
+    startRightWheel(speedSlow);
   }
 }
 
@@ -225,19 +189,17 @@ long getDistance() {
 }
 
 void veerAroundObstacleHardCode() {
-  // go right
-  startRightWheel(150);
-  startLeftWheel(200);
-  delay(2000);
-  // then go left
+  // go left
   startRightWheel(200);
   startLeftWheel(150);
   delay(2000);
+  // then go right
+  startRightWheel(150);
+  startLeftWheel(200);
 }
 
-void veerAroundObstacle(int targetColor) {
+void veerAroundObstacle(int targetColor, int currentColor) {
   // try to get back on track
-  int currentColor = getCurrentColor();
   if (currentColor == targetColor) {
     sawObstacle = false;
   }
@@ -245,42 +207,82 @@ void veerAroundObstacle(int targetColor) {
 
 // void handleBlock();
 
+// SETUP ---------------------------------------------------------
+void setup() {
+  // Set all the motor control pins to outputs
+  pinMode(enA, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  pinMode(enB, OUTPUT);
+  pinMode(in3, OUTPUT);
+  pinMode(in4, OUTPUT);
+
+  // Ultrasonic sensor
+  pinMode(trigPin, OUTPUT); // Sets the trigPin as an Output
+  pinMode(echoPin, INPUT);  // Sets the echoPin as an Input
+
+  // colors
+  pinMode(S0, OUTPUT); pinMode(S1, OUTPUT);
+  pinMode(S2, OUTPUT); pinMode(S3, OUTPUT);
+  pinMode(sensorOut, INPUT);
+
+  // Frequency scaling
+  digitalWrite(S0, HIGH);
+  digitalWrite(S1, LOW);
+
+  // ---- Calibrate on WHITE (IMPORTANT: same distance + same "white" material you'll use) ----
+  Serial.println("Put WHITE under sensor at FINAL distance. Calibrating...");
+  delay(800);
+
+  // Your confirmed mapping:
+  wR = avgPulse(LOW,  LOW);    // 00 = RED
+  wB = avgPulse(LOW,  HIGH);   // 01 = BLUE
+  wG = avgPulse(HIGH, HIGH);   // 11 = GREEN
+
+  Serial.print("WHITE ref pulses: wR="); Serial.print(wR);
+  Serial.print(" wG="); Serial.print(wG);
+  Serial.print(" wB="); Serial.println(wB);
+  Serial.println("Done. Now show colors.");
+
+  Serial.begin(9600);
+}
+
 // MAIN LOOP ------------------------------------------------------
 void loop() {
   int currentColor = getCurrentColor(); // Read color once per loop
   Serial.print(currentColor);
-  // long dist = getDistance();     // Read distance once per loop
-  // if (stage == 0) {
+  long dist = getDistance();     // Read distance once per loop
+  if (stage == 0) {
 
-  //   // ---- 0. BLACK PATH ----
-  //   if (currentColor == 3) {        // switch to red path!
-  //     stage = 1
-  //   } else {
-  //     followLine(2);                  // follow black path
-  //   }
+    // ---- 0. BLACK PATH ----
+    if (currentColor == 3) {        // switch to red path!
+      stage = 1
+    } else {
+      followLine(2, currentColor);                  // follow black path
+    }
 
-  // } else if (stage == 1) {
+  } else if (stage == 1) {
 
-  //   // ---- 1. RED PATH
-  //   if (currentColor == 5) {        // blue tape
-  //     handleBlock();
-  //   } else if (dist > 0 && dist < 30) {
-  //     sawObstacle = true;
-  //     veerAroundObstacleHardCode();
-  //   } else if (sawObstacle) {
-  //     veerAroundObstacle();
-  //   } else if (currentColor == 4) { // switch to green path!
-  //     stage = 2;
-  //   } else {
-  //     followLine(3);                  // follow red path
-  //   }
+    // ---- 1. RED PATH
+    if (currentColor == 5) {        // blue tape
+      handleBlock();
+    } else if (dist > 0 && dist < 30) {
+      sawObstacle = true;
+      veerAroundObstacleHardCode();
+    } else if (sawObstacle) {
+      veerAroundObstacle(3, currentColor);
+    } else if (currentColor == 4) { // switch to green path!
+      stage = 2;
+    } else {
+      followLine(3, currentColor);                  // follow red path
+    }
     
-  // } else if (stage == 2) {
+  } else if (stage == 2) {
 
-  //   // ---- 2. GREEN PATH ----
-  //   // do something
-  //   followLine(4);                    // follow green path
-  // }
+    // ---- 2. GREEN PATH ----
+    // do something
+    followLine(4, currentColor);                    // follow green path
+  }
 
   delay(100);
 }
